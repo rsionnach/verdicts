@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from verdict.models import AccuracyReport, Outcome, Verdict
 
@@ -38,78 +39,109 @@ class VerdictStore(ABC):
         """Store a verdict."""
 
     @abstractmethod
-    def get(self, id: str) -> Verdict | None:
+    def get(self, verdict_id: str) -> Verdict | None:
         """Retrieve a verdict by ID."""
 
     @abstractmethod
-    def query(self, filter: VerdictFilter) -> list[Verdict]:
+    def query(self, criteria: VerdictFilter) -> list[Verdict]:
         """Query verdicts matching a filter."""
 
     @abstractmethod
-    def update_outcome(self, id: str, outcome: Outcome) -> Verdict:
+    def update_outcome(self, verdict_id: str, outcome: Outcome) -> Verdict:
         """Update a verdict's outcome."""
 
     @abstractmethod
-    def accuracy(self, filter: AccuracyFilter) -> AccuracyReport:
+    def accuracy(self, criteria: AccuracyFilter) -> AccuracyReport:
         """Compute accuracy metrics from resolved verdicts."""
 
     @abstractmethod
-    def expire(self, before: datetime) -> int:
-        """Expire pending verdicts older than the given timestamp. Returns count expired."""
+    def by_lineage(
+        self, verdict_id: str, direction: str = "both",
+    ) -> list[Verdict]:
+        """Traverse the verdict chain.
+
+        Args:
+            verdict_id: Starting verdict ID.
+            direction: "up" (parents/context), "down" (children), or "both".
+        """
+
+    @abstractmethod
+    def expire(self) -> int:
+        """Expire pending verdicts past their TTL. Returns count expired."""
 
 
-@dataclass
 class MemoryStore(VerdictStore):
-    """In-memory verdict store for testing and development."""
+    """In-memory verdict store for testing and development. Not thread-safe."""
 
-    _verdicts: dict[str, Verdict] = field(default_factory=dict)
+    def __init__(self) -> None:
+        self._verdicts: dict[str, Verdict] = {}
+        self._lock = threading.Lock()
 
     def put(self, verdict: Verdict) -> None:
-        self._verdicts[verdict.id] = verdict
+        with self._lock:
+            self._verdicts[verdict.id] = verdict
 
-    def get(self, id: str) -> Verdict | None:
-        return self._verdicts.get(id)
+    def get(self, verdict_id: str) -> Verdict | None:
+        with self._lock:
+            return self._verdicts.get(verdict_id)
 
-    def query(self, filter: VerdictFilter) -> list[Verdict]:
-        results = list(self._verdicts.values())
+    def query(self, criteria: VerdictFilter) -> list[Verdict]:
+        with self._lock:
+            results = list(self._verdicts.values())
 
-        if filter.producer_system:
-            results = [v for v in results if v.producer.system == filter.producer_system]
-        if filter.subject_type:
-            results = [v for v in results if v.subject.type == filter.subject_type]
-        if filter.subject_agent:
-            results = [v for v in results if v.subject.agent == filter.subject_agent]
-        if filter.subject_service:
-            results = [v for v in results if v.subject.service == filter.subject_service]
-        if filter.status:
-            results = [v for v in results if v.outcome.status == filter.status]
-        if filter.tags:
+        if criteria.producer_system:
+            results = [v for v in results if v.producer.system == criteria.producer_system]
+        if criteria.subject_type:
+            results = [v for v in results if v.subject.type == criteria.subject_type]
+        if criteria.subject_agent:
+            results = [v for v in results if v.subject.agent == criteria.subject_agent]
+        if criteria.subject_service:
+            results = [v for v in results if v.subject.service == criteria.subject_service]
+        if criteria.status:
+            results = [v for v in results if v.outcome.status == criteria.status]
+        if criteria.tags:
             results = [
                 v for v in results
-                if v.judgment.tags and set(filter.tags) & set(v.judgment.tags)
+                if v.judgment.tags and set(criteria.tags) & set(v.judgment.tags)
             ]
-        if filter.from_time:
-            results = [v for v in results if v.timestamp >= filter.from_time]
-        if filter.to_time:
-            results = [v for v in results if v.timestamp <= filter.to_time]
+        if criteria.from_time:
+            results = [v for v in results if v.timestamp >= criteria.from_time]
+        if criteria.to_time:
+            results = [v for v in results if v.timestamp <= criteria.to_time]
 
         results.sort(key=lambda v: v.timestamp, reverse=True)
-        return results[: filter.limit]
 
-    def update_outcome(self, id: str, outcome: Outcome) -> Verdict:
-        verdict = self._verdicts.get(id)
-        if verdict is None:
-            raise KeyError(f"Verdict {id} not found")
-        verdict.outcome = outcome
-        return verdict
+        if criteria.limit > 0:
+            return results[: criteria.limit]
+        return results
 
-    def accuracy(self, filter: AccuracyFilter) -> AccuracyReport:
-        verdicts = self.query(
-            VerdictFilter(
-                producer_system=filter.producer_system,
-                from_time=filter.from_time,
-                to_time=filter.to_time,
-            )
+    def _query_all(
+        self,
+        producer_system: str | None = None,
+        from_time: datetime | None = None,
+        to_time: datetime | None = None,
+    ) -> list[Verdict]:
+        """Internal query without limit, for accuracy computation."""
+        return self.query(VerdictFilter(
+            producer_system=producer_system,
+            from_time=from_time,
+            to_time=to_time,
+            limit=0,
+        ))
+
+    def update_outcome(self, verdict_id: str, outcome: Outcome) -> Verdict:
+        with self._lock:
+            verdict = self._verdicts.get(verdict_id)
+            if verdict is None:
+                raise KeyError(f"Verdict {verdict_id} not found")
+            verdict.outcome = outcome
+            return verdict
+
+    def accuracy(self, criteria: AccuracyFilter) -> AccuracyReport:
+        verdicts = self._query_all(
+            producer_system=criteria.producer_system,
+            from_time=criteria.from_time,
+            to_time=criteria.to_time,
         )
 
         total = len(verdicts)
@@ -128,14 +160,14 @@ class MemoryStore(VerdictStore):
                 return 0.0
             return sum(v.judgment.confidence for v in vs) / len(vs)
 
-        confirmation_rate = safe_div(len(confirmed), len(confirmed) + len(overridden))
-        override_rate = safe_div(len(overridden), len(confirmed) + len(overridden))
+        confirmation_rate = safe_div(len(confirmed), total_resolved)
+        override_rate = safe_div(len(overridden), total_resolved)
 
         mean_conf_correct = mean_confidence(confirmed)
         mean_conf_incorrect = mean_confidence(overridden)
 
         return AccuracyReport(
-            producer=filter.producer_system,
+            producer=criteria.producer_system,
             total=total,
             total_resolved=total_resolved,
             confirmation_rate=confirmation_rate,
@@ -145,13 +177,70 @@ class MemoryStore(VerdictStore):
             mean_confidence_on_correct=mean_conf_correct,
             mean_confidence_on_incorrect=mean_conf_incorrect,
             calibration_gap=abs(mean_conf_correct - confirmation_rate),
-            dimension=filter.dimension,
+            dimension=criteria.dimension,
         )
 
-    def expire(self, before: datetime) -> int:
+    def by_lineage(
+        self, verdict_id: str, direction: str = "both",
+    ) -> list[Verdict]:
+        if direction not in ("up", "down", "both"):
+            raise ValueError(f"direction must be 'up', 'down', or 'both', got '{direction}'")
+
+        visited: set[str] = set()
+        result: list[Verdict] = []
+
+        def traverse_up(vid: str) -> None:
+            with self._lock:
+                v = self._verdicts.get(vid)
+            if v is None or vid in visited:
+                return
+            visited.add(vid)
+            result.append(v)
+            if v.lineage.parent:
+                traverse_up(v.lineage.parent)
+            for ctx_id in v.lineage.context:
+                traverse_up(ctx_id)
+
+        def traverse_down(vid: str) -> None:
+            with self._lock:
+                v = self._verdicts.get(vid)
+            if v is None or vid in visited:
+                return
+            visited.add(vid)
+            result.append(v)
+            for child_id in v.lineage.children:
+                traverse_down(child_id)
+
+        # Always skip the starting verdict itself
+        visited.add(verdict_id)
+
+        with self._lock:
+            start = self._verdicts.get(verdict_id)
+        if start is None:
+            return []
+
+        if direction in ("up", "both"):
+            if start.lineage.parent:
+                traverse_up(start.lineage.parent)
+            for ctx_id in start.lineage.context:
+                traverse_up(ctx_id)
+
+        if direction in ("down", "both"):
+            for child_id in start.lineage.children:
+                traverse_down(child_id)
+
+        return result
+
+    def expire(self) -> int:
+        now = datetime.now(timezone.utc)
         count = 0
-        for verdict in self._verdicts.values():
-            if verdict.outcome.status == "pending" and verdict.timestamp < before:
-                verdict.outcome.status = "expired"
-                count += 1
+        with self._lock:
+            for verdict in self._verdicts.values():
+                if verdict.outcome.status != "pending":
+                    continue
+                expiry_time = verdict.timestamp + timedelta(seconds=verdict.metadata.ttl)
+                if expiry_time < now:
+                    verdict.outcome.status = "expired"
+                    verdict.outcome.closed_at = now
+                    count += 1
         return count

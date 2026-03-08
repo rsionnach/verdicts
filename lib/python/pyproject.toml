@@ -21,8 +21,4 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-sqlite = []
-yaml = ["pyyaml>=6.0"]
-
-[project.scripts]
-verdict = "verdict.cli:main"
+dev = ["pytest>=7.0"]

@@ -5,8 +5,9 @@ No model calls. No judgment. Just structured decision records.
 """
 
 from verdict.core import create, link, resolve, supersede
-from verdict.models import Verdict, AccuracyReport
-from verdict.store import VerdictStore
+from verdict.models import AccuracyReport, Verdict
+from verdict.serialise import from_dict, from_json, to_dict, to_json
+from verdict.store import AccuracyFilter, MemoryStore, VerdictFilter, VerdictStore
 
 __all__ = [
     "create",
@@ -16,4 +17,11 @@ __all__ = [
     "Verdict",
     "AccuracyReport",
     "VerdictStore",
+    "MemoryStore",
+    "VerdictFilter",
+    "AccuracyFilter",
+    "to_dict",
+    "to_json",
+    "from_dict",
+    "from_json",
 ]

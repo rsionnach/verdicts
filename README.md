@@ -42,13 +42,30 @@ v = resolve(v, status="confirmed")
 
 ### Measure accuracy
 
-```bash
-verdict accuracy --producer my-reviewer --window 30d
+```python
+from verdict import MemoryStore, AccuracyFilter
+
+store = MemoryStore()
+store.put(v)
+
+report = store.accuracy(AccuracyFilter(producer_system="my-reviewer"))
+print(f"Confirmation rate: {report.confirmation_rate}")
+print(f"Calibration gap: {report.calibration_gap}")
 ```
 
-### Replay historical decisions
+### Serialise and deserialise
+
+```python
+from verdict import to_json, from_json
+
+json_str = to_json(v)
+v2 = from_json(json_str)
+```
+
+### CLI (coming soon)
 
 ```bash
+verdict accuracy --producer my-reviewer --window 30d
 verdict replay --producer my-reviewer --from 2026-02-01 --to 2026-03-01
 ```
 

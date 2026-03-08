@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import os
+import threading
+import uuid
 from datetime import datetime, timezone
 
 from verdict.models import (
@@ -17,17 +18,27 @@ from verdict.models import (
     Verdict,
 )
 
-_counter = 0
+_id_lock = threading.Lock()
+_id_sequence = 0
 
 
 def _generate_id() -> str:
-    """Generate a unique verdict ID."""
-    global _counter
-    _counter += 1
+    """Generate a unique verdict ID. Thread-safe."""
+    global _id_sequence
+    with _id_lock:
+        _id_sequence += 1
+        seq = _id_sequence
+    short_uuid = uuid.uuid4().hex[:8]
     now = datetime.now(timezone.utc)
     date_part = now.strftime("%Y-%m-%d")
-    pid = os.getpid()
-    return f"vrd-{date_part}-{pid:05d}-{_counter:05d}"
+    return f"vrd-{date_part}-{short_uuid}-{seq:05d}"
+
+
+def _coerce(value: dict | object, cls: type) -> object:
+    """Convert a dict to a dataclass instance if needed."""
+    if isinstance(value, dict):
+        return cls(**value)
+    return value
 
 
 def create(
@@ -37,16 +48,13 @@ def create(
     metadata: dict | Metadata | None = None,
 ) -> Verdict:
     """Create a new verdict with a generated ID, current timestamp, and pending outcome."""
-    if isinstance(subject, dict):
-        subject = Subject(**subject)
-    if isinstance(judgment, dict):
-        judgment = Judgment(**judgment)
-    if isinstance(producer, dict):
-        producer = Producer(**producer)
+    subject = _coerce(subject, Subject)
+    judgment = _coerce(judgment, Judgment)
+    producer = _coerce(producer, Producer)
     if metadata is None:
         metadata = Metadata()
-    elif isinstance(metadata, dict):
-        metadata = Metadata(**metadata)
+    else:
+        metadata = _coerce(metadata, Metadata)
 
     return Verdict(
         id=_generate_id(),
@@ -66,7 +74,7 @@ def link(
     parent: str | None = None,
     context: list[str] | None = None,
 ) -> Verdict:
-    """Set lineage fields on a verdict."""
+    """Set lineage fields on a verdict. Mutates and returns the verdict."""
     if parent is not None:
         verdict.lineage.parent = parent
     if context is not None:
@@ -81,10 +89,13 @@ def resolve(
     ground_truth: dict | GroundTruth | None = None,
     resolution: str | None = None,
 ) -> Verdict:
-    """Update the outcome phase. Transitions status from pending to the resolved state."""
+    """Update the outcome phase. Mutates and returns the verdict.
+
+    Transitions status from pending to the resolved state.
+    """
     valid_statuses = {"confirmed", "overridden", "partial", "superseded", "expired"}
     if status not in valid_statuses:
-        raise ValueError(f"Invalid status '{status}'. Must be one of: {valid_statuses}")
+        raise ValueError(f"Invalid status '{status}'. Must be one of: {sorted(valid_statuses)}")
 
     if verdict.outcome.status != "pending":
         raise ValueError(
@@ -113,7 +124,15 @@ def resolve(
 
 
 def supersede(old_verdict: Verdict, new_verdict: Verdict) -> tuple[Verdict, Verdict]:
-    """Mark old_verdict as superseded, set new_verdict as the replacement."""
+    """Mark old_verdict as superseded, set new_verdict as the replacement.
+
+    Mutates both verdicts. Updates lineage in both directions.
+    """
+    if old_verdict.id == new_verdict.id:
+        raise ValueError(
+            f"Cannot supersede a verdict with itself (id: {old_verdict.id})"
+        )
     old_verdict = resolve(old_verdict, status="superseded")
     new_verdict.lineage.parent = old_verdict.id
+    old_verdict.lineage.children.append(new_verdict.id)
     return old_verdict, new_verdict

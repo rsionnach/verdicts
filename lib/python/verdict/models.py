@@ -6,6 +6,18 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+VALID_SUBJECT_TYPES = frozenset({
+    "agent_output", "correlation", "triage", "investigation",
+    "remediation", "review", "classification", "recommendation",
+    "moderation", "custom",
+})
+
+VALID_ACTIONS = frozenset({
+    "approve", "reject", "flag", "escalate", "defer", "custom",
+})
+
+TTL_DEFAULT = 90 * 24 * 60 * 60  # 90 days in seconds
+
 
 @dataclass
 class Producer:
@@ -25,6 +37,13 @@ class Subject:
     environment: str | None = None
     content_hash: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.type not in VALID_SUBJECT_TYPES:
+            raise ValueError(
+                f"Invalid subject type '{self.type}'. "
+                f"Must be one of: {sorted(VALID_SUBJECT_TYPES)}"
+            )
+
 
 @dataclass
 class Judgment:
@@ -34,6 +53,28 @@ class Judgment:
     dimensions: dict[str, float] | None = None
     reasoning: str | None = None
     tags: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.action not in VALID_ACTIONS:
+            raise ValueError(
+                f"Invalid action '{self.action}'. "
+                f"Must be one of: {sorted(VALID_ACTIONS)}"
+            )
+        if not (0.0 <= self.confidence <= 1.0):
+            raise ValueError(
+                f"Confidence must be between 0.0 and 1.0, got {self.confidence}"
+            )
+        if self.score is not None and not (0.0 <= self.score <= 1.0):
+            raise ValueError(
+                f"Score must be between 0.0 and 1.0, got {self.score}"
+            )
+        if self.dimensions:
+            for dim_name, dim_value in self.dimensions.items():
+                if not (0.0 <= dim_value <= 1.0):
+                    raise ValueError(
+                        f"Dimension '{dim_name}' must be between 0.0 and 1.0, "
+                        f"got {dim_value}"
+                    )
 
 
 @dataclass
@@ -72,7 +113,7 @@ class Metadata:
     cost_tokens: int | None = None
     cost_currency: float | None = None
     latency_ms: int | None = None
-    ttl: int = 7776000  # 90 days
+    ttl: int = TTL_DEFAULT
     custom: dict[str, Any] = field(default_factory=dict)
 
 
