@@ -68,6 +68,51 @@ See [SPEC.md](SPEC.md) for the full schema specification, or [schema/verdict.jso
 
 No framework required. No ecosystem required. Just a schema and a small library.
 
+## OTel Integration
+
+Verdicts are the data primitive. OpenTelemetry is the transmission format. The verdict library maps between the two automatically.
+
+When a verdict is created, resolved, or overridden, it emits OTel events using the `gen_ai.*` semantic conventions that the broader OTel community is developing. This means verdict data flows into any OTel-compatible backend (Prometheus, Grafana, Datadog, Honeycomb) without custom integrations.
+
+### Events
+
+| OTel Event | Trigger |
+|------------|---------|
+| `gen_ai.decision.created` | `verdict.create()` |
+| `gen_ai.decision.confirmed` | `verdict.resolve(status: confirmed)` |
+| `gen_ai.override.recorded` | `verdict.resolve(status: overridden)` |
+
+### Metrics (via OTel Collector → Prometheus)
+
+| Metric | Type | What It Measures |
+|--------|------|------------------|
+| `gen_ai_decision_total` | counter | Total judgments produced |
+| `gen_ai_decision_score` | gauge | Quality score per judgment |
+| `gen_ai_decision_confidence` | gauge | Producer confidence per judgment |
+| `gen_ai_override_reversal_total` | counter | Judgments overridden by humans |
+| `gen_ai_override_correction_total` | counter | Judgments partially corrected |
+| `gen_ai_decision_cost_tokens` | counter | Token consumption |
+| `gen_ai_decision_cost_currency` | gauge | Estimated cost in USD |
+
+All metrics carry `system`, `agent`, and `environment` labels derived from the verdict's `producer` and `subject` fields.
+
+### Attribute Mapping
+
+Key verdict fields map to standard OTel attributes:
+
+| Verdict Field | OTel Attribute |
+|--------------|----------------|
+| `producer.system` | `gen_ai.system` |
+| `producer.model` | `gen_ai.request.model` |
+| `judgment.action` | `gen_ai.decision.action` |
+| `judgment.confidence` | `gen_ai.decision.confidence` |
+| `subject.service` | `service.name` |
+| `outcome.override.by` | `gen_ai.override.actor` |
+
+For systems using verdicts outside of generative AI contexts (traditional ML, rule-based systems, manual decision tracking), the library can emit using a `decision.*` namespace instead. The verdict schema is the same regardless of namespace.
+
+See [conventions/](conventions/) for the full semantic convention specifications.
+
 ## Storage
 
 | Tier | Store | Use Case |
