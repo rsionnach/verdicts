@@ -139,7 +139,6 @@ class AccuracyReport:
     override_rate: float
     partial_rate: float
     pending_rate: float
-    mean_confidence_on_correct: float
-    mean_confidence_on_incorrect: float
-    calibration_gap: float
+    mean_confidence_on_confirmed: float
+    mean_confidence_on_overridden: float
     dimension: str | None = None

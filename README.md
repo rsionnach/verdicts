@@ -50,7 +50,7 @@ store.put(v)
 
 report = store.accuracy(AccuracyFilter(producer_system="my-reviewer"))
 print(f"Confirmation rate: {report.confirmation_rate}")
-print(f"Calibration gap: {report.calibration_gap}")
+print(f"Override rate: {report.override_rate}")
 ```
 
 ### Serialise and deserialise

@@ -163,8 +163,8 @@ class MemoryStore(VerdictStore):
         confirmation_rate = safe_div(len(confirmed), total_resolved)
         override_rate = safe_div(len(overridden), total_resolved)
 
-        mean_conf_correct = mean_confidence(confirmed)
-        mean_conf_incorrect = mean_confidence(overridden)
+        mean_conf_confirmed = mean_confidence(confirmed)
+        mean_conf_overridden = mean_confidence(overridden)
 
         return AccuracyReport(
             producer=criteria.producer_system,
@@ -174,9 +174,8 @@ class MemoryStore(VerdictStore):
             override_rate=override_rate,
             partial_rate=safe_div(len(partial), total_resolved),
             pending_rate=safe_div(len(pending), total),
-            mean_confidence_on_correct=mean_conf_correct,
-            mean_confidence_on_incorrect=mean_conf_incorrect,
-            calibration_gap=abs(mean_conf_correct - confirmation_rate),
+            mean_confidence_on_confirmed=mean_conf_confirmed,
+            mean_confidence_on_overridden=mean_conf_overridden,
             dimension=criteria.dimension,
         )
 
