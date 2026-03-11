@@ -146,6 +146,8 @@ Metrics emitted via OTel Collector → Prometheus: `gen_ai_decision_total`, `gen
 - The library is the mechanism; producers (Arbiter, SitRep, Mayday) are the sources of judgment.
 - `resolve()` requires `outcome.status == "pending"` — resolved verdicts are immutable.
 - `TTL_DEFAULT` = 90 days (7,776,000 seconds). Override via `Metadata.ttl`.
+- Gaming detection threshold: score-outcome divergence > 0.10 triggers an alert (high scores with poor real-world confirmation rate signals rubric optimisation rather than genuine correctness).
+- Unresolved verdicts past TTL expire with a weak negative signal; if 60%+ of verdicts expire unresolved, the feedback loop is broken.
 
 ---
 

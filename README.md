@@ -231,6 +231,39 @@ See [conventions/](conventions/) for the full semantic convention specifications
 
 ---
 
+## OpenSRM Ecosystem
+
+Verdicts are independent of any specific ecosystem, but within the [OpenSRM](https://github.com/rsionnach/opensrm) reliability stack, the Verdict Store is the shared data substrate that all judgment-producing components communicate through:
+
+```
+Static Layer (Data + Tools)
+  OpenSRM Manifests → NthLayer → Generated Artifacts
+        │
+        ▼
+Verdict Layer (Data Primitive)  ← this library
+  verdict.create()  verdict.resolve()  verdict.query()
+        │
+        ▼
+Agent Layer (Reasoning)
+  SitRep → [verdict] → Mayday Agents ← [verdict.accuracy()] → Arbiter
+  All agents emit verdicts with lineage.
+        │ OTel side-effects
+        ▼
+Semantic Conventions (OTel)
+  Change Events │ Decision Telemetry │ Outcomes
+```
+
+Verdicts with lineage are the primary cross-component communication mechanism. SitRep emits correlation verdicts, Mayday agents emit triage/investigation/remediation verdicts linked via lineage, and Arbiter queries `verdict.accuracy()` for self-calibration. One human override at any point in the chain propagates calibration signals to every verdict upstream.
+
+| Component | How it uses Verdict |
+|-----------|-------------------|
+| [Arbiter](https://github.com/rsionnach/arbiter) | Produces `agent_output` verdicts for every evaluation; queries `accuracy()` for self-calibration |
+| [SitRep](https://github.com/rsionnach/sitrep) | Produces `correlation` verdicts; ingests Arbiter quality verdicts as events |
+| [Mayday](https://github.com/rsionnach/mayday) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts; consumes SitRep verdicts as context |
+| [NthLayer](https://github.com/rsionnach/nthlayer) | Queries Prometheus metrics that originate from verdict OTel emission |
+
+---
+
 ## Storage
 
 | Tier | Store | Use Case |
