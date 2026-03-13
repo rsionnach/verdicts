@@ -118,6 +118,9 @@ class VerdictStore(ABC):
     def accuracy(self, criteria: AccuracyFilter) -> AccuracyReport
     def by_lineage(self, verdict_id: str, direction: str = "both") -> list[Verdict]
     def expire(self) -> int  # expires pending verdicts past TTL, returns count
+    # Concrete convenience method (not abstract):
+    def resolve(self, verdict_id: str, status: str, override=None, ground_truth=None, resolution=None) -> Verdict
+    # get → core.resolve() → update_outcome in one call; raises KeyError if verdict_id not found
 ```
 
 **VerdictFilter** fields: `producer_system`, `subject_type`, `subject_agent`, `subject_service`, `status`, `tags`, `from_time`, `to_time`, `limit` (default 100; 0 = unlimited)
@@ -137,6 +140,10 @@ class VerdictStore(ABC):
 - **Tag filtering**: tags live inside the JSON blob, so SQL LIMIT is suppressed when `VerdictFilter.tags` is set; Python-side filtering is applied after fetch
 - **Context manager**: supports `with SQLiteVerdictStore(...) as store:` — calls `close()` on exit, which releases the calling thread's connection
 - **expire()**: scans all `pending` rows in Python, marks past-TTL verdicts as `expired` in a single batched commit
+
+### Testing
+
+`tests/test_store.py` uses `@pytest.fixture(params=["memory", "sqlite"])` — every store test runs against both `MemoryStore` and `SQLiteVerdictStore`. Add new store tests to this parametrized fixture; do not write memory-only or sqlite-only tests unless testing implementation-specific behaviour.
 
 ---
 
