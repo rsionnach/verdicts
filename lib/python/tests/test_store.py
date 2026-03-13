@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from verdict.core import create, resolve
+from verdict.sqlite_store import SQLiteVerdictStore
 from verdict.store import AccuracyFilter, MemoryStore, VerdictFilter
 
 
@@ -18,21 +19,30 @@ def _make_verdict(system="test", confidence=0.8, **overrides):
     return create(**kwargs)
 
 
-class TestMemoryStorePutAndGet:
-    def test_put_and_get(self):
-        store = MemoryStore()
+@pytest.fixture(params=["memory", "sqlite"])
+def store(request, tmp_path):
+    if request.param == "memory":
+        return MemoryStore()
+    return SQLiteVerdictStore(tmp_path / "test.db")
+
+
+class TestStorePutAndGet:
+    def test_put_and_get(self, store):
         v = _make_verdict()
         store.put(v)
-        assert store.get(v.id) is v
+        retrieved = store.get(v.id)
+        assert retrieved is not None
+        assert retrieved.id == v.id
+        assert retrieved.producer.system == v.producer.system
+        assert retrieved.subject.type == v.subject.type
+        assert retrieved.judgment.confidence == v.judgment.confidence
 
-    def test_get_missing_returns_none(self):
-        store = MemoryStore()
+    def test_get_missing_returns_none(self, store):
         assert store.get("vrd-nonexistent") is None
 
 
-class TestMemoryStoreQuery:
-    def test_query_by_producer(self):
-        store = MemoryStore()
+class TestStoreQuery:
+    def test_query_by_producer(self, store):
         v1 = _make_verdict(system="alpha")
         v2 = _make_verdict(system="beta")
         store.put(v1)
@@ -41,18 +51,17 @@ class TestMemoryStoreQuery:
         assert len(results) == 1
         assert results[0].id == v1.id
 
-    def test_query_by_status(self):
-        store = MemoryStore()
+    def test_query_by_status(self, store):
         v1 = _make_verdict()
         v2 = _make_verdict()
         store.put(v1)
         store.put(v2)
         resolve(v1, status="confirmed")
+        store.update_outcome(v1.id, v1.outcome)
         results = store.query(VerdictFilter(status="confirmed"))
         assert len(results) == 1
 
-    def test_query_by_tags(self):
-        store = MemoryStore()
+    def test_query_by_tags(self, store):
         v1 = _make_verdict(judgment={"action": "approve", "confidence": 0.8, "tags": ["auth", "security"]})
         v2 = _make_verdict(judgment={"action": "approve", "confidence": 0.8, "tags": ["database"]})
         store.put(v1)
@@ -61,27 +70,23 @@ class TestMemoryStoreQuery:
         assert len(results) == 1
         assert results[0].id == v1.id
 
-    def test_query_empty_store(self):
-        store = MemoryStore()
+    def test_query_empty_store(self, store):
         results = store.query(VerdictFilter())
         assert results == []
 
-    def test_query_respects_limit(self):
-        store = MemoryStore()
+    def test_query_respects_limit(self, store):
         for _ in range(10):
             store.put(_make_verdict())
         results = store.query(VerdictFilter(limit=3))
         assert len(results) == 3
 
-    def test_query_limit_zero_returns_all(self):
-        store = MemoryStore()
+    def test_query_limit_zero_returns_all(self, store):
         for _ in range(10):
             store.put(_make_verdict())
         results = store.query(VerdictFilter(limit=0))
         assert len(results) == 10
 
-    def test_query_by_time_range(self):
-        store = MemoryStore()
+    def test_query_by_time_range(self, store):
         v = _make_verdict()
         store.put(v)
         # Should be found within a wide time range
@@ -92,8 +97,7 @@ class TestMemoryStoreQuery:
         ))
         assert len(results) == 1
 
-    def test_query_by_subject_type(self):
-        store = MemoryStore()
+    def test_query_by_subject_type(self, store):
         v = _make_verdict(subject={"type": "correlation", "ref": "r", "summary": "s"})
         store.put(v)
         store.put(_make_verdict())
@@ -101,13 +105,13 @@ class TestMemoryStoreQuery:
         assert len(results) == 1
 
 
-class TestMemoryStoreAccuracy:
-    def test_accuracy_all_confirmed(self):
-        store = MemoryStore()
+class TestStoreAccuracy:
+    def test_accuracy_all_confirmed(self, store):
         for _ in range(5):
             v = _make_verdict(confidence=0.9)
             store.put(v)
             resolve(v, status="confirmed")
+            store.update_outcome(v.id, v.outcome)
         report = store.accuracy(AccuracyFilter(producer_system="test"))
         assert report.confirmation_rate == 1.0
         assert report.override_rate == 0.0
@@ -115,76 +119,77 @@ class TestMemoryStoreAccuracy:
         assert report.total_resolved == 5
         assert report.pending_rate == 0.0
 
-    def test_accuracy_mixed(self):
-        store = MemoryStore()
+    def test_accuracy_mixed(self, store):
         for _ in range(3):
             v = _make_verdict(confidence=0.9)
             store.put(v)
             resolve(v, status="confirmed")
+            store.update_outcome(v.id, v.outcome)
         for _ in range(2):
             v = _make_verdict(confidence=0.6)
             store.put(v)
             resolve(v, status="overridden")
+            store.update_outcome(v.id, v.outcome)
         report = store.accuracy(AccuracyFilter(producer_system="test"))
         assert report.total == 5
         assert report.total_resolved == 5
         assert report.confirmation_rate == 3 / 5
         assert report.override_rate == 2 / 5
 
-    def test_accuracy_with_pending(self):
-        store = MemoryStore()
+    def test_accuracy_with_pending(self, store):
         v1 = _make_verdict()
         v2 = _make_verdict()
         store.put(v1)
         store.put(v2)
         resolve(v1, status="confirmed")
+        store.update_outcome(v1.id, v1.outcome)
         report = store.accuracy(AccuracyFilter(producer_system="test"))
         assert report.total == 2
         assert report.total_resolved == 1
         assert report.pending_rate == 0.5
 
-    def test_accuracy_empty_store(self):
-        store = MemoryStore()
+    def test_accuracy_empty_store(self, store):
         report = store.accuracy(AccuracyFilter(producer_system="test"))
         assert report.total == 0
         assert report.confirmation_rate == 0.0
         assert report.override_rate == 0.0
 
-    def test_accuracy_not_truncated_by_limit(self):
+    def test_accuracy_not_truncated_by_limit(self, store):
         """Accuracy must consider ALL matching verdicts, not just the first 100."""
-        store = MemoryStore()
         for _ in range(150):
             v = _make_verdict(confidence=0.9)
             store.put(v)
             resolve(v, status="confirmed")
+            store.update_outcome(v.id, v.outcome)
         report = store.accuracy(AccuracyFilter(producer_system="test"))
         assert report.total == 150
         assert report.total_resolved == 150
         assert report.confirmation_rate == 1.0
 
-    def test_accuracy_consistent_denominators(self):
+    def test_accuracy_consistent_denominators(self, store):
         """confirmation_rate + override_rate + partial_rate should equal 1.0 when all resolved."""
-        store = MemoryStore()
         for _ in range(3):
             v = _make_verdict()
             store.put(v)
             resolve(v, status="confirmed")
+            store.update_outcome(v.id, v.outcome)
         for _ in range(2):
             v = _make_verdict()
             store.put(v)
             resolve(v, status="overridden")
+            store.update_outcome(v.id, v.outcome)
         for _ in range(1):
             v = _make_verdict()
             store.put(v)
             resolve(v, status="partial")
+            store.update_outcome(v.id, v.outcome)
         report = store.accuracy(AccuracyFilter(producer_system="test"))
         total_rate = report.confirmation_rate + report.override_rate + report.partial_rate
         assert abs(total_rate - 1.0) < 1e-9
 
 
-class TestMemoryStoreExpire:
-    def test_expire_respects_ttl(self):
-        store = MemoryStore()
+class TestStoreExpire:
+    def test_expire_respects_ttl(self, store):
         v = _make_verdict(metadata={"ttl": 1})  # 1 second TTL
         # Backdate the timestamp
         v.timestamp = datetime.now(timezone.utc) - timedelta(seconds=10)
@@ -194,28 +199,26 @@ class TestMemoryStoreExpire:
         assert store.get(v.id).outcome.status == "expired"
         assert store.get(v.id).outcome.closed_at is not None
 
-    def test_expire_does_not_expire_fresh_verdicts(self):
-        store = MemoryStore()
+    def test_expire_does_not_expire_fresh_verdicts(self, store):
         v = _make_verdict()  # default 90-day TTL
         store.put(v)
         count = store.expire()
         assert count == 0
         assert store.get(v.id).outcome.status == "pending"
 
-    def test_expire_skips_resolved_verdicts(self):
-        store = MemoryStore()
+    def test_expire_skips_resolved_verdicts(self, store):
         v = _make_verdict(metadata={"ttl": 1})
         v.timestamp = datetime.now(timezone.utc) - timedelta(seconds=10)
         store.put(v)
         resolve(v, status="confirmed")
+        store.update_outcome(v.id, v.outcome)
         count = store.expire()
         assert count == 0
         assert store.get(v.id).outcome.status == "confirmed"
 
 
-class TestMemoryStoreLineage:
-    def test_by_lineage_down(self):
-        store = MemoryStore()
+class TestStoreLineage:
+    def test_by_lineage_down(self, store):
         parent = _make_verdict()
         child1 = _make_verdict()
         child2 = _make_verdict()
@@ -231,8 +234,7 @@ class TestMemoryStoreLineage:
         assert child1.id in result_ids
         assert child2.id in result_ids
 
-    def test_by_lineage_up(self):
-        store = MemoryStore()
+    def test_by_lineage_up(self, store):
         parent = _make_verdict()
         child = _make_verdict()
         child.lineage.parent = parent.id
@@ -243,23 +245,20 @@ class TestMemoryStoreLineage:
         assert len(results) == 1
         assert results[0].id == parent.id
 
-    def test_by_lineage_nonexistent_returns_empty(self):
-        store = MemoryStore()
+    def test_by_lineage_nonexistent_returns_empty(self, store):
         results = store.by_lineage("vrd-nonexistent")
         assert results == []
 
-    def test_by_lineage_invalid_direction_raises(self):
-        store = MemoryStore()
+    def test_by_lineage_invalid_direction_raises(self, store):
         v = _make_verdict()
         store.put(v)
         with pytest.raises(ValueError, match="direction must be"):
             store.by_lineage(v.id, direction="sideways")
 
 
-class TestMemoryStoreUpdateOutcome:
-    def test_update_outcome(self):
+class TestStoreUpdateOutcome:
+    def test_update_outcome(self, store):
         from verdict.models import Outcome
-        store = MemoryStore()
         v = _make_verdict()
         store.put(v)
         new_outcome = Outcome(status="confirmed", resolution="All good")
@@ -267,8 +266,20 @@ class TestMemoryStoreUpdateOutcome:
         assert updated.outcome.status == "confirmed"
         assert updated.outcome.resolution == "All good"
 
-    def test_update_outcome_missing_raises(self):
+    def test_update_outcome_missing_raises(self, store):
         from verdict.models import Outcome
-        store = MemoryStore()
         with pytest.raises(KeyError, match="not found"):
             store.update_outcome("vrd-nonexistent", Outcome())
+
+
+class TestStoreCommunicationSubjectType:
+    def test_communication_subject_type(self, store):
+        v = create(
+            subject={"type": "communication", "ref": "msg:123", "summary": "Incident update"},
+            judgment={"action": "approve", "confidence": 0.9},
+            producer={"system": "test"},
+        )
+        store.put(v)
+        retrieved = store.get(v.id)
+        assert retrieved is not None
+        assert retrieved.subject.type == "communication"
