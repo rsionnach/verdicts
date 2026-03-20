@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "nthlayer-learn"
 version = "0.1.0"
 description = "The atomic unit of AI judgment — structured records for tracking AI decision quality"
-readme = "../../README.md"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 keywords = ["ai", "judgment", "evaluation", "quality", "observability"]
