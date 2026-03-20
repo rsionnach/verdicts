@@ -1,8 +1,8 @@
-# Verdict — Agent Context
+# nthlayer-learn — Agent Context
 
 The atomic unit of AI judgment. A schema and transport library for recording AI decisions and closing the loop on whether they were correct.
 
-**Status: Python library implemented. CLI not yet implemented.**
+**Status: Python library implemented. CLI implemented (Phase 0 complete).**
 
 ---
 
@@ -26,17 +26,20 @@ verdicts/
 ├── conventions/                 # OTel semantic convention specs
 ├── lib/
 │   └── python/                  # Python transport library (implemented)
-│       └── verdict/
+│       └── nthlayer_learn/
 │           ├── __init__.py      # Public API surface
 │           ├── models.py        # Dataclasses: Verdict, Producer, Subject, Judgment, Outcome, Lineage, Metadata
 │           ├── core.py          # Operations: create, link, resolve, supersede
 │           ├── serialise.py     # to_json, from_json, to_dict, from_dict
-│           └── store.py         # VerdictStore ABC, MemoryStore, VerdictFilter, AccuracyFilter
+│           ├── store.py         # VerdictStore ABC, MemoryStore, VerdictFilter, AccuracyFilter
+│           ├── sqlite_store.py  # SQLiteVerdictStore — WAL-mode, thread-local connections
+│           ├── cli.py           # CLI entry point — accuracy and list subcommands
+│           └── __main__.py      # python -m nthlayer_learn entry point
 ├── stores/
 │   ├── sqlite/                  # Default Tier 1 store
 │   ├── postgres/                # Tier 2 store
 │   └── clickhouse/              # Tier 3 store
-├── cli/                         # CLI tools (not yet implemented)
+├── cli/                         # CLI tools (accuracy, list implemented; replay, eval, gaming-check planned)
 └── eval/                        # Example evaluation datasets
 ```
 
@@ -56,7 +59,7 @@ Three phases per verdict:
 | Tier | Store | Notes |
 |------|-------|-------|
 | In-memory | `MemoryStore` | Thread-safe, for testing and development |
-| Tier 1 | SQLite | Default, zero dependencies |
+| Tier 1 | `SQLiteVerdictStore` | Implemented — WAL mode, thread-local connections, zero dependencies |
 | Tier 2 | PostgreSQL | Concurrent access, full-text search |
 | Tier 3 | ClickHouse | Analytics over millions of verdicts |
 <!-- END AUTO-MANAGED -->
@@ -65,14 +68,15 @@ Three phases per verdict:
 
 ## Python Library
 
-Install: `pip install verdict`
+Install: `pip install nthlayer-learn`
 
 ### Public API
 
 ```python
-from verdict import create, link, resolve       # core operations
-from verdict import to_json, from_json          # serialisation
-from verdict import MemoryStore, VerdictFilter, AccuracyFilter  # store
+from nthlayer_learn import create, link, resolve, supersede          # core operations
+from nthlayer_learn import to_json, from_json                        # serialisation
+from nthlayer_learn import MemoryStore, SQLiteVerdictStore           # store implementations
+from nthlayer_learn import VerdictFilter, AccuracyFilter             # query/filter types
 ```
 
 ### Key Operations
@@ -93,7 +97,7 @@ from verdict import MemoryStore, VerdictFilter, AccuracyFilter  # store
 
 ### Validation Rules
 
-- `Subject.type` must be in `VALID_SUBJECT_TYPES`: `agent_output`, `correlation`, `triage`, `investigation`, `remediation`, `review`, `classification`, `recommendation`, `moderation`, `custom`
+- `Subject.type` must be in `VALID_SUBJECT_TYPES`: `agent_output`, `correlation`, `triage`, `investigation`, `remediation`, `review`, `classification`, `recommendation`, `moderation`, `communication`, `custom`
 - `Judgment.action` must be in `VALID_ACTIONS`: `approve`, `reject`, `flag`, `escalate`, `defer`, `custom`
 - `Judgment.confidence` and `Judgment.score` (if set): `0.0 <= value <= 1.0`
 - `Judgment.dimensions` values: all must be in `[0.0, 1.0]`
@@ -116,6 +120,9 @@ class VerdictStore(ABC):
     def accuracy(self, criteria: AccuracyFilter) -> AccuracyReport
     def by_lineage(self, verdict_id: str, direction: str = "both") -> list[Verdict]
     def expire(self) -> int  # expires pending verdicts past TTL, returns count
+    # Concrete convenience method (not abstract):
+    def resolve(self, verdict_id: str, status: str, override=None, ground_truth=None, resolution=None) -> Verdict
+    # get → core.resolve() → update_outcome in one call; raises KeyError if verdict_id not found
 ```
 
 **VerdictFilter** fields: `producer_system`, `subject_type`, `subject_agent`, `subject_service`, `status`, `tags`, `from_time`, `to_time`, `limit` (default 100; 0 = unlimited)
@@ -125,6 +132,20 @@ class VerdictStore(ABC):
 **AccuracyReport** fields: `producer`, `total`, `total_resolved`, `confirmation_rate`, `override_rate`, `partial_rate`, `pending_rate`, `mean_confidence_on_confirmed`, `mean_confidence_on_overridden`, `dimension`
 
 `by_lineage` direction: `"up"` (parents + context), `"down"` (children), `"both"`
+
+### SQLiteVerdictStore
+
+`SQLiteVerdictStore(db_path)` — the Tier 1 default store. Implements the full `VerdictStore` interface.
+
+- **Concurrency**: WAL mode (`PRAGMA journal_mode=WAL`) + `PRAGMA busy_timeout=5000`; one thread-local `sqlite3.Connection` per thread (lazy init)
+- **Schema**: single `verdicts` table — `id`, `version`, `timestamp`, `data` (full JSON blob), `producer_system`, `subject_type`, `subject_agent`, `subject_service`, `outcome_status`, `ttl`, `closed_at`; indexes on `timestamp`, `(producer_system, timestamp)`, `subject_type`, `outcome_status`
+- **Tag filtering**: tags live inside the JSON blob, so SQL LIMIT is suppressed when `VerdictFilter.tags` is set; Python-side filtering is applied after fetch
+- **Context manager**: supports `with SQLiteVerdictStore(...) as store:` — calls `close()` on exit, which releases the calling thread's connection
+- **expire()**: scans all `pending` rows in Python, marks past-TTL verdicts as `expired` in a single batched commit
+
+### Testing
+
+`tests/test_store.py` uses `@pytest.fixture(params=["memory", "sqlite"])` — every store test runs against both `MemoryStore` and `SQLiteVerdictStore`. Add new store tests to this parametrized fixture; do not write memory-only or sqlite-only tests unless testing implementation-specific behaviour.
 
 ---
 
@@ -151,13 +172,28 @@ Metrics emitted via OTel Collector → Prometheus: `gen_ai_decision_total`, `gen
 
 ---
 
-## Planned CLI (Not Yet Implemented)
+## CLI
+
+Entry point: `nthlayer-learn` (installed via `pip install nthlayer-learn`) or `python -m nthlayer_learn`.
+
+### Implemented subcommands
 
 ```bash
-verdict accuracy --producer arbiter --window 30d
-verdict replay --producer arbiter --from 2026-02-01 --to 2026-03-01
-verdict eval --producer arbiter --dataset eval/arbiter/
-verdict gaming-check --producer arbiter --agent code-reviewer --window 90d
+nthlayer-learn accuracy --producer <name> [--window 30d] [--db verdicts.db]
+nthlayer-learn list [--producer <name>] [--status pending] [--limit 20] [--db verdicts.db]
+```
+
+- `accuracy`: prints confirmation rate, override rate, partial rate, pending rate, and mean confidence for confirmed/overridden verdicts. `--producer` is required. `--window` filters to recent verdicts using duration format (ms, s, m, h, d, w).
+- `list`: tabular output of verdict ID, timestamp, status, confidence, producer, and subject ref. All flags optional.
+- Default `--db` path: `verdicts.db` (relative to cwd). SQLite creates the file if missing.
+- Duration format: `NNunit` where unit is `ms`, `s`, `m`, `h`, `d`, or `w` (e.g. `30d`, `24h`).
+
+### Planned subcommands (not yet implemented)
+
+```bash
+nthlayer-learn replay --producer arbiter --from 2026-02-01 --to 2026-03-01
+nthlayer-learn eval --producer arbiter --dataset eval/arbiter/
+nthlayer-learn gaming-check --producer arbiter --agent code-reviewer --window 90d
 ```
 
 ---
@@ -168,8 +204,8 @@ Verdict sits below all other components in the dependency graph. Every judgment-
 
 | Component | Role |
 |-----------|------|
-| [opensrm](https://github.com/rsionnach/opensrm) | Declares judgment SLOs; verdict metrics feed SLO compliance |
-| [arbiter](https://github.com/rsionnach/arbiter) | Produces `agent_output` verdicts for every evaluation |
-| [sitrep](https://github.com/rsionnach/sitrep) | Produces `correlation` verdicts; reads `verdict` as event type |
-| [mayday](https://github.com/rsionnach/mayday) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts |
-| [nthlayer](https://github.com/rsionnach/nthlayer) | Queries Prometheus metrics that originate from verdict OTel emission |
+| [nthlayer-spec](../nthlayer-spec/) | Declares judgment SLOs; verdict metrics feed SLO compliance |
+| [nthlayer-measure](../arbiter/) | Produces `agent_output` verdicts for every evaluation |
+| [nthlayer-correlate](../sitrep/) | Produces `correlation` verdicts; reads `verdict` as event type |
+| [nthlayer-respond](../mayday/) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts |
+| [nthlayer](../nthlayer/) | Queries Prometheus metrics that originate from verdict OTel emission |

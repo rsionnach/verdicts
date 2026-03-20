@@ -9,7 +9,7 @@ from typing import Any
 VALID_SUBJECT_TYPES = frozenset({
     "agent_output", "correlation", "triage", "investigation",
     "remediation", "review", "classification", "recommendation",
-    "moderation", "custom",
+    "moderation", "communication", "custom",
 })
 
 VALID_ACTIONS = frozenset({

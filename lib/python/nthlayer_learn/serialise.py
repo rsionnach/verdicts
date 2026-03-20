@@ -7,7 +7,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any
 
-from verdict.models import (
+from nthlayer_learn.models import (
     GroundTruth,
     Judgment,
     Lineage,

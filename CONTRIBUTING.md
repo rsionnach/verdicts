@@ -13,7 +13,7 @@ python -m pytest tests/
 ### Running Evaluation Datasets
 
 ```bash
-verdict eval --producer arbiter --dataset eval/code-review/
+nthlayer-learn eval --producer arbiter --dataset eval/code-review/
 ```
 
 ## Schema Changes

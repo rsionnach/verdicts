@@ -6,7 +6,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
-from verdict.models import (
+from nthlayer_learn.models import (
     GroundTruth,
     Judgment,
     Lineage,

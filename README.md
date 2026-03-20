@@ -1,10 +1,10 @@
-# Verdict — The Atomic Unit of AI Judgment
+# nthlayer-learn — The Atomic Unit of AI Judgment
 
 AI systems today are fire-and-forget. They make thousands of decisions per day (approving code, correlating signals, triaging incidents, moderating content, generating recommendations) and almost never find out whether those decisions were right. Quality degrades silently, confidence doesn't track reality, and the same mistakes repeat indefinitely because there is no feedback loop.
 
 Verdicts close that loop. A verdict is a structured record of an AI decision that tracks what was evaluated, what was decided, how confident the AI was, and (critically) whether the decision turned out to be correct. The outcome phase is what makes verdicts different from logging: it turns isolated decisions into measurable, improvable judgment quality.
 
-Verdicts are independent of the [OpenSRM](https://github.com/rsionnach/opensrm-ecosystem) ecosystem, independent of any specific agent framework, and independent of any specific model provider. Any system where an AI makes decisions can emit verdicts.
+Verdicts are independent of the [OpenSRM](https://github.com/rsionnach/opensrm) ecosystem, independent of any specific agent framework, and independent of any specific model provider. Any system where an AI makes decisions can emit verdicts.
 
 ---
 
@@ -85,7 +85,7 @@ Not every verdict needs direct validation. A configurable percentage (default 5%
 The `gaming-check` query compares an agent's average judgment score against its actual outcome confirmation rate over a rolling window. An agent scoring 0.88 on average but with only 71% of its decisions confirmed by outcomes has a 17-point divergence, which is a signal that its scores don't reflect reality. This surfaces problems across thousands of verdicts without reviewing any of them individually.
 
 ```bash
-verdict gaming-check --producer arbiter --agent code-reviewer --window 90d
+nthlayer-learn gaming-check --producer arbiter --agent code-reviewer --window 90d
 # code-reviewer: score 0.88, outcome confirmation 0.71, divergence 0.17 -> ALERT
 # doc-writer: score 0.79, outcome confirmation 0.81, divergence -0.02 -> OK
 ```
@@ -101,13 +101,13 @@ A verdict that remains unresolved past its TTL (default 90 days) expires with a 
 ### Install
 
 ```bash
-pip install verdict
+pip install nthlayer-learn
 ```
 
 ### Create a verdict
 
 ```python
-from verdict import create, resolve
+from nthlayer_learn import create, resolve
 
 # Record a judgment
 v = create(
@@ -123,7 +123,7 @@ v = resolve(v, status="confirmed")
 ### Measure accuracy
 
 ```python
-from verdict import MemoryStore, AccuracyFilter
+from nthlayer_learn import MemoryStore, AccuracyFilter
 
 store = MemoryStore()
 store.put(v)
@@ -137,7 +137,7 @@ print(f"Calibration gap: {report.mean_confidence_on_confirmed - report.confirmat
 ### Serialise and deserialise
 
 ```python
-from verdict import to_json, from_json
+from nthlayer_learn import to_json, from_json
 
 json_str = to_json(v)
 v2 = from_json(json_str)
@@ -146,9 +146,9 @@ v2 = from_json(json_str)
 ### CLI (coming soon)
 
 ```bash
-verdict accuracy --producer my-reviewer --window 30d
-verdict replay --producer my-reviewer --from 2026-02-01 --to 2026-03-01
-verdict gaming-check --producer my-reviewer --agent code-reviewer --window 90d
+nthlayer-learn accuracy --producer my-reviewer --window 30d
+nthlayer-learn replay --producer my-reviewer --from 2026-02-01 --to 2026-03-01
+nthlayer-learn gaming-check --producer my-reviewer --agent code-reviewer --window 90d
 ```
 
 ---
@@ -257,9 +257,9 @@ Verdicts with lineage are the primary cross-component communication mechanism. S
 
 | Component | How it uses Verdict |
 |-----------|-------------------|
-| [Arbiter](https://github.com/rsionnach/arbiter) | Produces `agent_output` verdicts for every evaluation; queries `accuracy()` for self-calibration |
-| [SitRep](https://github.com/rsionnach/sitrep) | Produces `correlation` verdicts; ingests Arbiter quality verdicts as events |
-| [Mayday](https://github.com/rsionnach/mayday) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts; consumes SitRep verdicts as context |
+| [nthlayer-measure](https://github.com/rsionnach/nthlayer-measure) | Produces `agent_output` verdicts for every evaluation; queries `accuracy()` for self-calibration |
+| [nthlayer-correlate](https://github.com/rsionnach/nthlayer-correlate) | Produces `correlation` verdicts; ingests Arbiter quality verdicts as events |
+| [nthlayer-respond](https://github.com/rsionnach/nthlayer-respond) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts; consumes SitRep verdicts as context |
 | [NthLayer](https://github.com/rsionnach/nthlayer) | Queries Prometheus metrics that originate from verdict OTel emission |
 
 ---
