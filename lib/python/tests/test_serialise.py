@@ -2,8 +2,8 @@
 
 import pytest
 
-from verdict.core import create, resolve
-from verdict.serialise import from_dict, from_json, to_dict, to_json
+from nthlayer_learn.core import create, resolve
+from nthlayer_learn.serialise import from_dict, from_json, to_dict, to_json
 
 
 def _make_verdict(**overrides):

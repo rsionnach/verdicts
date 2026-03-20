@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from verdict.models import Judgment, Subject, VALID_ACTIONS, VALID_SUBJECT_TYPES
+from nthlayer_learn.models import Judgment, Subject, VALID_ACTIONS, VALID_SUBJECT_TYPES
 
 
 class TestSubjectValidation:

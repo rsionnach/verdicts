@@ -5,10 +5,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from verdict.core import create, resolve
-from verdict.models import Outcome
-from verdict.sqlite_store import SQLiteVerdictStore
-from verdict.store import AccuracyFilter, VerdictFilter
+from nthlayer_learn.core import create, resolve
+from nthlayer_learn.models import Outcome
+from nthlayer_learn.sqlite_store import SQLiteVerdictStore
+from nthlayer_learn.store import AccuracyFilter, VerdictFilter
 
 
 def _make_verdict(system="test", confidence=0.8, **overrides):

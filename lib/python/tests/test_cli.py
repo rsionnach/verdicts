@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from verdict import SQLiteVerdictStore, create
+from nthlayer_learn import SQLiteVerdictStore, create
 
 
 def _seed_store(db_path: str) -> None:
@@ -77,7 +77,7 @@ def seeded_db(tmp_path: Path) -> str:
 class TestAccuracyCommand:
     def test_accuracy_basic(self, seeded_db: str) -> None:
         """accuracy --producer arbiter shows confirmation/override rates."""
-        from verdict.cli import main
+        from nthlayer_learn.cli import main
 
         out = _run_cli(["accuracy", "--producer", "arbiter", "--db", seeded_db])
         assert "arbiter" in out
@@ -187,7 +187,7 @@ class TestEntryPoint:
     def test_module_invocable(self, seeded_db: str) -> None:
         """python -m verdict works as an entry point."""
         result = subprocess.run(
-            [sys.executable, "-m", "verdict", "list", "--db", seeded_db],
+            [sys.executable, "-m", "nthlayer_learn", "list", "--db", seeded_db],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).parent.parent),
@@ -205,7 +205,7 @@ def _run_cli(args: list[str]) -> str:
     import io
     import contextlib
 
-    from verdict.cli import main
+    from nthlayer_learn.cli import main
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

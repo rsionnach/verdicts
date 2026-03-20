@@ -2,7 +2,7 @@
 
 import pytest
 
-from verdict.core import create, link, resolve, supersede
+from nthlayer_learn.core import create, link, resolve, supersede
 
 
 def _make_verdict(**overrides):
@@ -32,7 +32,7 @@ class TestCreate:
         assert v.judgment.confidence == 0.8
 
     def test_creates_verdict_from_dataclasses(self):
-        from verdict.models import Subject, Judgment, Producer
+        from nthlayer_learn.models import Subject, Judgment, Producer
         v = create(
             subject=Subject(type="review", ref="ref", summary="s"),
             judgment=Judgment(action="approve", confidence=0.5),

@@ -4,9 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from verdict.core import create, resolve
-from verdict.sqlite_store import SQLiteVerdictStore
-from verdict.store import AccuracyFilter, MemoryStore, VerdictFilter
+from nthlayer_learn.core import create, resolve
+from nthlayer_learn.sqlite_store import SQLiteVerdictStore
+from nthlayer_learn.store import AccuracyFilter, MemoryStore, VerdictFilter
 
 
 def _make_verdict(system="test", confidence=0.8, **overrides):
@@ -258,7 +258,7 @@ class TestStoreLineage:
 
 class TestStoreUpdateOutcome:
     def test_update_outcome(self, store):
-        from verdict.models import Outcome
+        from nthlayer_learn.models import Outcome
         v = _make_verdict()
         store.put(v)
         new_outcome = Outcome(status="confirmed", resolution="All good")
@@ -267,7 +267,7 @@ class TestStoreUpdateOutcome:
         assert updated.outcome.resolution == "All good"
 
     def test_update_outcome_missing_raises(self, store):
-        from verdict.models import Outcome
+        from nthlayer_learn.models import Outcome
         with pytest.raises(KeyError, match="not found"):
             store.update_outcome("vrd-nonexistent", Outcome())
 

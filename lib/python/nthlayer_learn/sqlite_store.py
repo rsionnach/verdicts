@@ -8,9 +8,9 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from verdict.models import AccuracyReport, Outcome, Verdict
-from verdict.serialise import from_dict, to_dict
-from verdict.store import AccuracyFilter, VerdictFilter, VerdictStore
+from nthlayer_learn.models import AccuracyReport, Outcome, Verdict
+from nthlayer_learn.serialise import from_dict, to_dict
+from nthlayer_learn.store import AccuracyFilter, VerdictFilter, VerdictStore
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS verdicts (

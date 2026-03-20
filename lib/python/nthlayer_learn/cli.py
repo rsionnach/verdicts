@@ -6,8 +6,8 @@ import argparse
 import re
 from datetime import datetime, timedelta, timezone
 
-from verdict.sqlite_store import SQLiteVerdictStore
-from verdict.store import AccuracyFilter, VerdictFilter
+from nthlayer_learn.sqlite_store import SQLiteVerdictStore
+from nthlayer_learn.store import AccuracyFilter, VerdictFilter
 
 _DURATION_RE = re.compile(r"^(\d+)(ms|s|m|h|d|w)$")
 
@@ -82,7 +82,7 @@ def _cmd_list(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="verdict", description="Query verdict stores")
+    parser = argparse.ArgumentParser(prog="nthlayer-learn", description="Query verdict stores")
     sub = parser.add_subparsers(dest="command")
     sub.required = True
 

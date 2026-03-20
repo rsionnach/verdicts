@@ -1,4 +1,4 @@
-# Verdict — Agent Context
+# nthlayer-learn — Agent Context
 
 The atomic unit of AI judgment. A schema and transport library for recording AI decisions and closing the loop on whether they were correct.
 
@@ -26,7 +26,7 @@ verdicts/
 ├── conventions/                 # OTel semantic convention specs
 ├── lib/
 │   └── python/                  # Python transport library (implemented)
-│       └── verdict/
+│       └── nthlayer_learn/
 │           ├── __init__.py      # Public API surface
 │           ├── models.py        # Dataclasses: Verdict, Producer, Subject, Judgment, Outcome, Lineage, Metadata
 │           ├── core.py          # Operations: create, link, resolve, supersede
@@ -34,7 +34,7 @@ verdicts/
 │           ├── store.py         # VerdictStore ABC, MemoryStore, VerdictFilter, AccuracyFilter
 │           ├── sqlite_store.py  # SQLiteVerdictStore — WAL-mode, thread-local connections
 │           ├── cli.py           # CLI entry point — accuracy and list subcommands
-│           └── __main__.py      # python -m verdict entry point
+│           └── __main__.py      # python -m nthlayer_learn entry point
 ├── stores/
 │   ├── sqlite/                  # Default Tier 1 store
 │   ├── postgres/                # Tier 2 store
@@ -68,15 +68,15 @@ Three phases per verdict:
 
 ## Python Library
 
-Install: `pip install verdict`
+Install: `pip install nthlayer-learn`
 
 ### Public API
 
 ```python
-from verdict import create, link, resolve, supersede          # core operations
-from verdict import to_json, from_json                        # serialisation
-from verdict import MemoryStore, SQLiteVerdictStore           # store implementations
-from verdict import VerdictFilter, AccuracyFilter             # query/filter types
+from nthlayer_learn import create, link, resolve, supersede          # core operations
+from nthlayer_learn import to_json, from_json                        # serialisation
+from nthlayer_learn import MemoryStore, SQLiteVerdictStore           # store implementations
+from nthlayer_learn import VerdictFilter, AccuracyFilter             # query/filter types
 ```
 
 ### Key Operations
@@ -174,13 +174,13 @@ Metrics emitted via OTel Collector → Prometheus: `gen_ai_decision_total`, `gen
 
 ## CLI
 
-Entry point: `verdict` (installed via `pip install verdict`) or `python -m verdict`.
+Entry point: `nthlayer-learn` (installed via `pip install nthlayer-learn`) or `python -m nthlayer_learn`.
 
 ### Implemented subcommands
 
 ```bash
-verdict accuracy --producer <name> [--window 30d] [--db verdicts.db]
-verdict list [--producer <name>] [--status pending] [--limit 20] [--db verdicts.db]
+nthlayer-learn accuracy --producer <name> [--window 30d] [--db verdicts.db]
+nthlayer-learn list [--producer <name>] [--status pending] [--limit 20] [--db verdicts.db]
 ```
 
 - `accuracy`: prints confirmation rate, override rate, partial rate, pending rate, and mean confidence for confirmed/overridden verdicts. `--producer` is required. `--window` filters to recent verdicts using duration format (ms, s, m, h, d, w).
@@ -191,9 +191,9 @@ verdict list [--producer <name>] [--status pending] [--limit 20] [--db verdicts.
 ### Planned subcommands (not yet implemented)
 
 ```bash
-verdict replay --producer arbiter --from 2026-02-01 --to 2026-03-01
-verdict eval --producer arbiter --dataset eval/arbiter/
-verdict gaming-check --producer arbiter --agent code-reviewer --window 90d
+nthlayer-learn replay --producer arbiter --from 2026-02-01 --to 2026-03-01
+nthlayer-learn eval --producer arbiter --dataset eval/arbiter/
+nthlayer-learn gaming-check --producer arbiter --agent code-reviewer --window 90d
 ```
 
 ---
@@ -204,8 +204,8 @@ Verdict sits below all other components in the dependency graph. Every judgment-
 
 | Component | Role |
 |-----------|------|
-| [opensrm](https://github.com/rsionnach/opensrm) | Declares judgment SLOs; verdict metrics feed SLO compliance |
-| [arbiter](https://github.com/rsionnach/arbiter) | Produces `agent_output` verdicts for every evaluation |
-| [sitrep](https://github.com/rsionnach/sitrep) | Produces `correlation` verdicts; reads `verdict` as event type |
-| [mayday](https://github.com/rsionnach/mayday) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts |
-| [nthlayer](https://github.com/rsionnach/nthlayer) | Queries Prometheus metrics that originate from verdict OTel emission |
+| [nthlayer-spec](../nthlayer-spec/) | Declares judgment SLOs; verdict metrics feed SLO compliance |
+| [nthlayer-measure](../arbiter/) | Produces `agent_output` verdicts for every evaluation |
+| [nthlayer-correlate](../sitrep/) | Produces `correlation` verdicts; reads `verdict` as event type |
+| [nthlayer-respond](../mayday/) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts |
+| [nthlayer](../nthlayer/) | Queries Prometheus metrics that originate from verdict OTel emission |

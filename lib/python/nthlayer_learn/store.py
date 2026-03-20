@@ -7,8 +7,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from verdict.core import resolve as _core_resolve
-from verdict.models import AccuracyReport, GroundTruth, Outcome, Override, Verdict
+from nthlayer_learn.core import resolve as _core_resolve
+from nthlayer_learn.models import AccuracyReport, GroundTruth, Outcome, Override, Verdict
 
 
 @dataclass

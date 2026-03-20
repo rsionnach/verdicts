@@ -6,7 +6,7 @@ Verdicts are the data primitive that turns five independent OpenSRM tools into a
 
 ### Arbiter
 
-The Arbiter's evaluation output becomes a verdict. Quality scores, dimensions, confidence, and reasoning map directly to the verdict schema. Self-calibration becomes `verdict accuracy --producer arbiter`.
+The Arbiter's evaluation output becomes a verdict. Quality scores, dimensions, confidence, and reasoning map directly to the verdict schema. Self-calibration becomes `nthlayer-learn accuracy --producer arbiter`.
 
 The Arbiter becomes more universal: any system that produces verdicts can be measured by it, without per-system adapters.
 
