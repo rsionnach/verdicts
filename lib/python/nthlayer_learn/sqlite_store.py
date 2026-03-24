@@ -58,8 +58,9 @@ class SQLiteVerdictStore(VerdictStore):
     def put(self, verdict: Verdict) -> None:
         data = json.dumps(to_dict(verdict))
         conn = self._conn()
-        conn.execute(
-            """INSERT OR REPLACE INTO verdicts
+        try:
+            conn.execute(
+                """INSERT INTO verdicts
                (id, version, timestamp, data, producer_system, subject_type,
                 subject_agent, subject_service, outcome_status, ttl, closed_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -79,6 +80,8 @@ class SQLiteVerdictStore(VerdictStore):
                 else None,
             ),
         )
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Verdict {verdict.id} already exists")
         conn.commit()
 
     def get(self, verdict_id: str) -> Verdict | None:
@@ -297,6 +300,7 @@ class SQLiteVerdictStore(VerdictStore):
         self,
         verdict_id: str,
         direction: str = "both",
+        max_depth: int = 500,
     ) -> list[Verdict]:
         if direction not in ("up", "down", "both"):
             raise ValueError(
@@ -305,77 +309,86 @@ class SQLiteVerdictStore(VerdictStore):
 
         visited: set[str] = set()
         result: list[Verdict] = []
-
-        def traverse_up(vid: str) -> None:
-            if vid in visited:
-                return
-            v = self.get(vid)
-            if v is None:
-                return
-            visited.add(vid)
-            result.append(v)
-            if v.lineage.parent:
-                traverse_up(v.lineage.parent)
-            for ctx_id in v.lineage.context:
-                traverse_up(ctx_id)
-
-        def traverse_down(vid: str) -> None:
-            if vid in visited:
-                return
-            v = self.get(vid)
-            if v is None:
-                return
-            visited.add(vid)
-            result.append(v)
-            for child_id in v.lineage.children:
-                traverse_down(child_id)
-
         visited.add(verdict_id)
+
         start = self.get(verdict_id)
         if start is None:
             return []
 
+        # Iterative BFS to avoid RecursionError on deep chains
+        queue: list[tuple[str, int]] = []
+
         if direction in ("up", "both"):
             if start.lineage.parent:
-                traverse_up(start.lineage.parent)
+                queue.append((start.lineage.parent, 1))
             for ctx_id in start.lineage.context:
-                traverse_up(ctx_id)
+                queue.append((ctx_id, 1))
 
         if direction in ("down", "both"):
             for child_id in start.lineage.children:
-                traverse_down(child_id)
+                queue.append((child_id, 1))
+
+        while queue:
+            vid, depth = queue.pop(0)
+            if vid in visited or depth > max_depth:
+                continue
+            v = self.get(vid)
+            if v is None:
+                continue
+            visited.add(vid)
+            result.append(v)
+
+            if depth < max_depth:
+                if direction in ("up", "both"):
+                    if v.lineage.parent:
+                        queue.append((v.lineage.parent, depth + 1))
+                    for ctx_id in v.lineage.context:
+                        queue.append((ctx_id, depth + 1))
+                if direction in ("down", "both"):
+                    for child_id in v.lineage.children:
+                        queue.append((child_id, depth + 1))
 
         return result
 
     def expire(self) -> int:
         now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
         conn = self._conn()
-        rows = conn.execute(
+        # Use cursor iteration to avoid loading all rows into memory
+        cursor = conn.execute(
             "SELECT id, data FROM verdicts WHERE outcome_status = 'pending'",
-        ).fetchall()
+        )
 
         count = 0
-        for row in rows:
+        batch: list[tuple[str, str, str]] = []
+        for row in cursor:
             verdict = from_dict(json.loads(row["data"]))
             expiry_time = verdict.timestamp + timedelta(seconds=verdict.metadata.ttl)
             if expiry_time < now:
                 verdict.outcome.status = "expired"
                 verdict.outcome.closed_at = now
                 data = json.dumps(to_dict(verdict))
-                conn.execute(
-                    """UPDATE verdicts
-                       SET data = ?, outcome_status = 'expired', closed_at = ?
-                       WHERE id = ?""",
-                    (data, now.isoformat(), row["id"]),
-                )
-                count += 1
+                batch.append((data, now_iso, row["id"]))
+
+        for data, closed, vid in batch:
+            conn.execute(
+                """UPDATE verdicts
+                   SET data = ?, outcome_status = 'expired', closed_at = ?
+                   WHERE id = ?""",
+                (data, closed, vid),
+            )
+            count += 1
 
         if count > 0:
             conn.commit()
         return count
 
     def close(self) -> None:
-        """Close the database connection for the current thread."""
+        """Close the database connection for the calling thread only.
+
+        Other threads' connections are not affected. This is a limitation
+        of the thread-local connection design.
+        """
         conn = getattr(self._local, "conn", None)
         if conn is not None:
             conn.close()

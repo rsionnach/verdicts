@@ -6,6 +6,8 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
+from typing import Any
+
 from nthlayer_learn.models import (
     GroundTruth,
     Judgment,
@@ -15,6 +17,7 @@ from nthlayer_learn.models import (
     Override,
     Producer,
     Subject,
+    VALID_OUTCOME_STATUSES,
     Verdict,
 )
 
@@ -34,7 +37,7 @@ def _generate_id() -> str:
     return f"vrd-{date_part}-{short_uuid}-{seq:05d}"
 
 
-def _coerce(value: dict | object, cls: type) -> object:
+def _coerce(value: dict | object, cls: type) -> Any:
     """Convert a dict to a dataclass instance if needed."""
     if isinstance(value, dict):
         return cls(**value)
@@ -93,9 +96,8 @@ def resolve(
 
     Transitions status from pending to the resolved state.
     """
-    valid_statuses = {"confirmed", "overridden", "partial", "superseded", "expired"}
-    if status not in valid_statuses:
-        raise ValueError(f"Invalid status '{status}'. Must be one of: {sorted(valid_statuses)}")
+    if status not in VALID_OUTCOME_STATUSES:
+        raise ValueError(f"Invalid status '{status}'. Must be one of: {sorted(VALID_OUTCOME_STATUSES)}")
 
     if verdict.outcome.status != "pending":
         raise ValueError(

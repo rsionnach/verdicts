@@ -9,10 +9,9 @@ from datetime import datetime, timedelta, timezone
 from nthlayer_learn.sqlite_store import SQLiteVerdictStore
 from nthlayer_learn.store import AccuracyFilter, VerdictFilter
 
-_DURATION_RE = re.compile(r"^(\d+)(ms|s|m|h|d|w)$")
+_DURATION_RE = re.compile(r"^(\d+)(s|m|h|d|w)$")
 
 _DURATION_UNITS: dict[str, int] = {
-    "ms": 0,  # sub-second, treated as 0 for timedelta
     "s": 1,
     "m": 60,
     "h": 3600,

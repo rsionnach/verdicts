@@ -16,6 +16,10 @@ VALID_ACTIONS = frozenset({
     "approve", "reject", "flag", "escalate", "defer", "custom",
 })
 
+VALID_OUTCOME_STATUSES = frozenset({
+    "confirmed", "overridden", "partial", "superseded", "expired",
+})
+
 TTL_DEFAULT = 90 * 24 * 60 * 60  # 90 days in seconds
 
 

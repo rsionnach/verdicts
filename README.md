@@ -51,7 +51,7 @@ outcome_tracking:
     - type: revert
       signal: "git revert of the commit within 7 days"
     - type: incident_correlation
-      signal: "SitRep correlation linking this change to an incident"
+      signal: "nthlayer-correlate correlation linking this change to an incident"
 ```
 
 ### Lineage propagation
@@ -59,20 +59,20 @@ outcome_tracking:
 When verdicts are linked through lineage (a correlation verdict informs an investigation verdict which informs a remediation verdict), one human override at any point in the chain propagates calibration signals to every verdict upstream. A single human action resolves five verdicts. This is the efficiency multiplier that makes human review scalable: humans review the decisions that matter most (remediations, governance actions), and lineage carries that signal back through the entire decision chain.
 
 ```
-SitRep correlation verdict (vrd-001)
+nthlayer-correlate correlation verdict (vrd-001)
   "deploy v2.3.1 caused latency spike, confidence 0.71"
     |
-    +-> Mayday investigation verdict (vrd-002, context: [vrd-001])
+    +-> nthlayer-respond investigation verdict (vrd-002, context: [vrd-001])
           "root cause: connection pooling removed, confidence 0.65"
             |
-            +-> Mayday remediation verdict (vrd-003, parent: vrd-002)
+            +-> nthlayer-respond remediation verdict (vrd-003, parent: vrd-002)
             |     "rollback to v2.3.0, confidence 0.90"
             |
             +-> Human override (vrd-004, parent: vrd-002)
                   "root cause correct, but hotfix not rollback"
                   (overrides vrd-003, confirms vrd-002)
 
-Result: SitRep gets a positive signal. Investigation agent gets a positive signal.
+Result: nthlayer-correlate gets a positive signal. Investigation agent gets a positive signal.
 Remediation agent gets a negative signal. All from one human action.
 ```
 
@@ -143,12 +143,14 @@ json_str = to_json(v)
 v2 = from_json(json_str)
 ```
 
-### CLI (coming soon)
+### CLI
 
 ```bash
+# Show accuracy report for a producer
 nthlayer-learn accuracy --producer my-reviewer --window 30d
-nthlayer-learn replay --producer my-reviewer --from 2026-02-01 --to 2026-03-01
-nthlayer-learn gaming-check --producer my-reviewer --agent code-reviewer --window 90d
+
+# List recent verdicts
+nthlayer-learn list --producer my-reviewer --status pending --limit 20
 ```
 
 ---
@@ -245,7 +247,7 @@ Verdict Layer (Data Primitive)  ← this library
         │
         ▼
 Agent Layer (Reasoning)
-  SitRep → [verdict] → Mayday Agents ← [verdict.accuracy()] → Arbiter
+  nthlayer-correlate → [verdict] → nthlayer-respond Agents ← [verdict.accuracy()] → nthlayer-measure
   All agents emit verdicts with lineage.
         │ OTel side-effects
         ▼
@@ -253,13 +255,13 @@ Semantic Conventions (OTel)
   Change Events │ Decision Telemetry │ Outcomes
 ```
 
-Verdicts with lineage are the primary cross-component communication mechanism. SitRep emits correlation verdicts, Mayday agents emit triage/investigation/remediation verdicts linked via lineage, and Arbiter queries `verdict.accuracy()` for self-calibration. One human override at any point in the chain propagates calibration signals to every verdict upstream.
+Verdicts with lineage are the primary cross-component communication mechanism. nthlayer-correlate emits correlation verdicts, nthlayer-respond agents emit triage/investigation/remediation verdicts linked via lineage, and nthlayer-measure queries `verdict.accuracy()` for self-calibration. One human override at any point in the chain propagates calibration signals to every verdict upstream.
 
 | Component | How it uses Verdict |
 |-----------|-------------------|
 | [nthlayer-measure](https://github.com/rsionnach/nthlayer-measure) | Produces `agent_output` verdicts for every evaluation; queries `accuracy()` for self-calibration |
-| [nthlayer-correlate](https://github.com/rsionnach/nthlayer-correlate) | Produces `correlation` verdicts; ingests Arbiter quality verdicts as events |
-| [nthlayer-respond](https://github.com/rsionnach/nthlayer-respond) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts; consumes SitRep verdicts as context |
+| [nthlayer-correlate](https://github.com/rsionnach/nthlayer-correlate) | Produces `correlation` verdicts; ingests nthlayer-measure quality verdicts as events |
+| [nthlayer-respond](https://github.com/rsionnach/nthlayer-respond) | Produces `triage`, `investigation`, `communication`, `remediation` verdicts; consumes nthlayer-correlate verdicts as context |
 | [NthLayer](https://github.com/rsionnach/nthlayer) | Queries Prometheus metrics that originate from verdict OTel emission |
 
 ---
@@ -278,7 +280,7 @@ Verdicts with lineage are the primary cross-component communication mechanism. S
 ## Project Structure
 
 ```
-verdicts/
+nthlayer-learn/
 ├── SPEC.md                      # Full schema specification
 ├── schema/                      # JSON Schema and annotated examples
 ├── conventions/                 # OTel semantic conventions

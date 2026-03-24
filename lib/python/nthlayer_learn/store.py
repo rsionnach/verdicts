@@ -23,13 +23,22 @@ class VerdictFilter:
     to_time: datetime | None = None
     limit: int = 100
 
+    def __post_init__(self) -> None:
+        for field_name in ("from_time", "to_time"):
+            val = getattr(self, field_name)
+            if val is not None and val.tzinfo is None:
+                raise ValueError(
+                    f"VerdictFilter.{field_name} must be timezone-aware "
+                    f"(got naive datetime). Use datetime.now(timezone.utc)."
+                )
+
 
 @dataclass
 class AccuracyFilter:
     producer_system: str
     from_time: datetime | None = None
     to_time: datetime | None = None
-    dimension: str | None = None
+    dimension: str | None = None  # TODO: dimension-level filtering not yet implemented
 
 
 class VerdictStore(ABC):
@@ -98,7 +107,11 @@ class VerdictStore(ABC):
 
 
 class MemoryStore(VerdictStore):
-    """In-memory verdict store for testing and development. Not thread-safe."""
+    """In-memory verdict store for testing and development.
+
+    Thread-safe for individual operations; compound operations
+    (e.g., get-then-update) may see concurrent mutations between steps.
+    """
 
     def __init__(self) -> None:
         self._verdicts: dict[str, Verdict] = {}
@@ -207,37 +220,13 @@ class MemoryStore(VerdictStore):
         )
 
     def by_lineage(
-        self, verdict_id: str, direction: str = "both",
+        self, verdict_id: str, direction: str = "both", max_depth: int = 500,
     ) -> list[Verdict]:
         if direction not in ("up", "down", "both"):
             raise ValueError(f"direction must be 'up', 'down', or 'both', got '{direction}'")
 
         visited: set[str] = set()
         result: list[Verdict] = []
-
-        def traverse_up(vid: str) -> None:
-            with self._lock:
-                v = self._verdicts.get(vid)
-            if v is None or vid in visited:
-                return
-            visited.add(vid)
-            result.append(v)
-            if v.lineage.parent:
-                traverse_up(v.lineage.parent)
-            for ctx_id in v.lineage.context:
-                traverse_up(ctx_id)
-
-        def traverse_down(vid: str) -> None:
-            with self._lock:
-                v = self._verdicts.get(vid)
-            if v is None or vid in visited:
-                return
-            visited.add(vid)
-            result.append(v)
-            for child_id in v.lineage.children:
-                traverse_down(child_id)
-
-        # Always skip the starting verdict itself
         visited.add(verdict_id)
 
         with self._lock:
@@ -245,15 +234,39 @@ class MemoryStore(VerdictStore):
         if start is None:
             return []
 
+        # Iterative BFS to avoid RecursionError on deep chains
+        queue: list[tuple[str, int]] = []  # (verdict_id, depth)
+
         if direction in ("up", "both"):
             if start.lineage.parent:
-                traverse_up(start.lineage.parent)
+                queue.append((start.lineage.parent, 1))
             for ctx_id in start.lineage.context:
-                traverse_up(ctx_id)
+                queue.append((ctx_id, 1))
 
         if direction in ("down", "both"):
             for child_id in start.lineage.children:
-                traverse_down(child_id)
+                queue.append((child_id, 1))
+
+        while queue:
+            vid, depth = queue.pop(0)
+            if vid in visited or depth > max_depth:
+                continue
+            with self._lock:
+                v = self._verdicts.get(vid)
+            if v is None:
+                continue
+            visited.add(vid)
+            result.append(v)
+
+            if depth < max_depth:
+                if direction in ("up", "both"):
+                    if v.lineage.parent:
+                        queue.append((v.lineage.parent, depth + 1))
+                    for ctx_id in v.lineage.context:
+                        queue.append((ctx_id, depth + 1))
+                if direction in ("down", "both"):
+                    for child_id in v.lineage.children:
+                        queue.append((child_id, depth + 1))
 
         return result
 

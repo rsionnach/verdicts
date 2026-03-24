@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/robfox/verdict/schema/verdict.json",
+  "$id": "https://github.com/rsionnach/nthlayer-learn/schema/verdict.json",
   "title": "Verdict",
   "description": "A structured record of an AI judgment",
   "type": "object",
