@@ -8,6 +8,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from nthlayer_learn.core import resolve as _core_resolve
 from nthlayer_learn.models import AccuracyReport, Outcome, Verdict
 from nthlayer_learn.serialise import from_dict, to_dict
 from nthlayer_learn.store import AccuracyFilter, VerdictFilter, VerdictStore
@@ -137,6 +138,57 @@ class SQLiteVerdictStore(VerdictStore):
                 results = results[: criteria.limit]
 
         return results
+
+    def resolve(
+        self,
+        verdict_id: str,
+        status: str,
+        override=None,
+        ground_truth=None,
+        resolution=None,
+    ) -> Verdict:
+        """Atomic resolve — uses conditional UPDATE to prevent double-resolution."""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT data FROM verdicts WHERE id = ? AND outcome_status = 'pending'",
+            (verdict_id,),
+        ).fetchone()
+        if row is None:
+            # Distinguish not-found from already-resolved
+            exists = conn.execute(
+                "SELECT outcome_status FROM verdicts WHERE id = ?",
+                (verdict_id,),
+            ).fetchone()
+            if exists is None:
+                raise KeyError(f"Verdict {verdict_id} not found")
+            raise ValueError(
+                f"Cannot resolve verdict {verdict_id}: status is "
+                f"'{exists['outcome_status']}', expected 'pending'"
+            )
+
+        verdict = from_dict(json.loads(row["data"]))
+        _core_resolve(
+            verdict, status, override=override,
+            ground_truth=ground_truth, resolution=resolution,
+        )
+        data = json.dumps(to_dict(verdict))
+
+        cursor = conn.execute(
+            """UPDATE verdicts SET data = ?, outcome_status = ?, closed_at = ?
+               WHERE id = ? AND outcome_status = 'pending'""",
+            (
+                data,
+                verdict.outcome.status,
+                verdict.outcome.closed_at.isoformat() if verdict.outcome.closed_at else None,
+                verdict_id,
+            ),
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            raise ValueError(
+                f"Verdict {verdict_id} was resolved concurrently"
+            )
+        return verdict
 
     def update_outcome(self, verdict_id: str, outcome: Outcome) -> Verdict:
         conn = self._conn()
