@@ -61,6 +61,8 @@
             "recommendation",
             "moderation",
             "communication",
+            "evaluation",
+            "retrospective",
             "custom"
           ],
           "description": "What kind of judgment this verdict records"

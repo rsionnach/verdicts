@@ -285,6 +285,49 @@ class TestStoreCommunicationSubjectType:
         assert retrieved.subject.type == "communication"
 
 
+    def test_evaluation_subject_type_with_custom_metadata(self, store):
+        v = create(
+            subject={"type": "evaluation", "ref": "fraud-detect", "summary": "Reversal rate breach"},
+            judgment={"action": "flag", "confidence": 0.95},
+            producer={"system": "nthlayer-measure"},
+            metadata={"custom": {
+                "slo_type": "judgment",
+                "slo_name": "reversal_rate",
+                "target": 0.05,
+                "current_value": 0.08,
+                "breach": True,
+                "consecutive": 3,
+            }},
+        )
+        store.put(v)
+        retrieved = store.get(v.id)
+        assert retrieved is not None
+        assert retrieved.subject.type == "evaluation"
+        assert retrieved.metadata.custom["slo_type"] == "judgment"
+        assert retrieved.metadata.custom["breach"] is True
+        assert retrieved.metadata.custom["consecutive"] == 3
+
+    def test_retrospective_subject_type_with_custom_metadata(self, store):
+        v = create(
+            subject={"type": "retrospective", "ref": "INC-4821", "summary": "Post-incident analysis"},
+            judgment={"action": "flag", "confidence": 0.85},
+            producer={"system": "nthlayer-learn"},
+            metadata={"custom": {
+                "incident_verdict_id": "vrd-2026-03-25-abc12345-00001",
+                "duration_minutes": 47.5,
+                "decisions_affected": 340,
+                "recommendations": [{"type": "slo_gate", "detail": "Add judgment SLO gate to CI/CD"}],
+            }},
+        )
+        store.put(v)
+        retrieved = store.get(v.id)
+        assert retrieved is not None
+        assert retrieved.subject.type == "retrospective"
+        assert retrieved.metadata.custom["duration_minutes"] == 47.5
+        assert retrieved.metadata.custom["decisions_affected"] == 340
+        assert len(retrieved.metadata.custom["recommendations"]) == 1
+
+
 class TestStoreResolve:
     def test_resolve_confirmed(self, store):
         v = _make_verdict()

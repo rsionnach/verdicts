@@ -33,7 +33,8 @@ nthlayer-learn/
 │           ├── serialise.py     # to_json, from_json, to_dict, from_dict
 │           ├── store.py         # VerdictStore ABC, MemoryStore, VerdictFilter, AccuracyFilter
 │           ├── sqlite_store.py  # SQLiteVerdictStore — WAL-mode, thread-local connections
-│           ├── cli.py           # CLI entry point — accuracy and list subcommands
+│           ├── cli.py           # CLI entry point — accuracy, list, retrospective subcommands
+│           ├── retrospective.py # build_retrospective() — walks lineage (by_lineage "up") + 24h window query (limit=500); computes duration_minutes, decisions_affected (breach=True evals), root_cause (first correlation verdict root_causes[0]), blast_radius (correlation then incident fallback), financial_impact (rpm×duration from spec.outcomes), recommendations (slo_gate/dependency_review/change_control); creates and stores retrospective verdict
 │           └── __main__.py      # python -m nthlayer_learn entry point
 ├── stores/
 │   ├── sqlite/                  # Default Tier 1 store
@@ -97,10 +98,25 @@ from nthlayer_learn import VerdictFilter, AccuracyFilter             # query/fil
 
 ### Validation Rules
 
-- `Subject.type` must be in `VALID_SUBJECT_TYPES`: `agent_output`, `correlation`, `triage`, `investigation`, `remediation`, `review`, `classification`, `recommendation`, `moderation`, `communication`, `custom`
+- `Subject.type` must be in `VALID_SUBJECT_TYPES`: `agent_output`, `correlation`, `triage`, `investigation`, `remediation`, `review`, `classification`, `recommendation`, `moderation`, `communication`, `evaluation`, `retrospective`, `custom`
 - `Judgment.action` must be in `VALID_ACTIONS`: `approve`, `reject`, `flag`, `escalate`, `defer`, `custom`
 - `Judgment.confidence` and `Judgment.score` (if set): `0.0 <= value <= 1.0`
 - `Judgment.dimensions` values: all must be in `[0.0, 1.0]`
+
+### Verdict Type Conventions
+
+Type-specific data goes in `metadata.custom` — the core schema stays generic. See `schema/verdict-types.md` for the full per-component conventions.
+
+| `subject.type` | Written by | Purpose |
+|----------------|------------|---------|
+| `evaluation` | nthlayer-measure | SLO evaluation result (`slo_type`, `slo_name`, `breach`, `consecutive`, `autonomy_action`) |
+| `correlation` | nthlayer-correlate | Root cause correlation (`trigger_verdict`, `root_causes`, `blast_radius`, `timeline`) |
+| `triage` / `custom` | nthlayer-respond | Incident record — `subject.type="triage"` OR `"custom"` with `metadata.custom.incident_type="incident"`; fields: `incident_id`, `severity`, `status`, `closed_at`, `root_cause`, `blast_radius` (list[str]), `actions_taken` |
+| `retrospective` | nthlayer-learn | Post-incident analysis: `incident_verdict_id`, `duration_minutes`, `decisions_affected`, `verdict_count`, `root_cause`, `blast_radius` (list[str]), `timeline` (≤20 entries), `financial_impact` ({estimated, currency, failure_mode, volume_source} or null), `recommendations` ([{type, detail, spec_field}]) |
+
+Lineage chain: `evaluation` → `correlation` → `triage`/`custom` → `retrospective`
+
+See `schema/verdict-types.md` for full per-field reference.
 
 ### Serialisation
 
@@ -147,6 +163,13 @@ class VerdictStore(ABC):
 
 `tests/test_store.py` uses `@pytest.fixture(params=["memory", "sqlite"])` — every store test runs against both `MemoryStore` and `SQLiteVerdictStore`. Add new store tests to this parametrized fixture; do not write memory-only or sqlite-only tests unless testing implementation-specific behaviour.
 
+Key invariants covered by the test suite:
+- `VerdictFilter(limit=0)` returns all results (unlimited); default limit=100 applies otherwise
+- `accuracy()` must consider all matching verdicts regardless of limit — not truncated at 100
+- `confirmation_rate + override_rate + partial_rate == 1.0` when all verdicts are resolved
+- `expire()` marks past-TTL pending verdicts as `expired` and sets `outcome.closed_at`
+- Time-range queries (`from_time`, `to_time`) and `subject_type` filtering are both exercised
+
 ---
 
 ## OTel Integration
@@ -181,12 +204,27 @@ Entry point: `nthlayer-learn` (installed via `pip install nthlayer-learn`) or `p
 ```bash
 nthlayer-learn accuracy --producer <name> [--window 30d] [--db verdicts.db]
 nthlayer-learn list [--producer <name>] [--status pending] [--limit 20] [--db verdicts.db]
+nthlayer-learn retrospective --incident-verdict <id> [--specs-dir <dir>] [--db verdicts.db]
 ```
 
-- `accuracy`: prints confirmation rate, override rate, partial rate, pending rate, and mean confidence for confirmed/overridden verdicts. `--producer` is required. `--window` filters to recent verdicts using duration format (ms, s, m, h, d, w).
+- `accuracy`: prints confirmation rate, override rate, partial rate, pending rate, and mean confidence for confirmed/overridden verdicts. `--producer` is required. `--window` filters to recent verdicts using duration format (s, m, h, d, w).
 - `list`: tabular output of verdict ID, timestamp, status, confidence, producer, and subject ref. All flags optional.
+- `retrospective`: walks verdict lineage from an incident verdict ID and produces a post-incident analysis verdict (`subject.type="retrospective"`, `producer.system="nthlayer-learn"`). Prints duration, decisions affected, verdict count, blast radius, recommendations, and financial impact (if `--specs-dir` provided). Exits 1 if verdict not found.
+  - Implementation: `build_retrospective(incident_verdict_id, verdict_store, specs_dir)` in `retrospective.py`
+  - Lineage walk: `verdict_store.by_lineage(id, direction="up")` + window query 24h after incident timestamp (limit=500)
+  - Verdict classification: evaluation (breach=True counting), correlation (root_causes/blast_radius extraction) from lineage chain
+  - `root_cause`: from `correlation_verdicts[0].metadata.custom["root_causes"][0]`
+  - `blast_radius`: from correlation verdicts' blast_radius lists; fallback to `incident_custom["blast_radius"]`
+  - `decisions_affected`: count of evaluation verdicts with `metadata.custom["breach"] == True`
+  - `duration_minutes`: earliest evaluation verdict timestamp → incident verdict timestamp
+  - Recommendations (`_generate_recommendations()`):
+    - `slo_gate`: any evaluation verdict has slo_type="judgment" and breach=True
+    - `dependency_review`: blast radius > 3 services
+    - `change_control`: reads `incident_custom.get("root_causes", [])` (incident metadata, not correlation verdict); type in `model_deploy`, `deploy`, `config_change`
+  - Financial impact (`_compute_financial_impact()`): model = `revenue_per_minute × duration_minutes` per affected service from OpenSRM YAML `spec.outcomes.revenue_per_minute`; returns `None` if no specs_dir or empty blast_radius; output shape: `{estimated, currency: "USD", failure_mode: "service_degradation", volume_source: "spec.outcomes.revenue_per_minute"}`
+  - Timeline: capped at 20 entries (chronological); `_build_timeline` uses `v.subject.ref or v.subject.service` (ref first, service as fallback)
 - Default `--db` path: `verdicts.db` (relative to cwd). SQLite creates the file if missing.
-- Duration format: `NNunit` where unit is `ms`, `s`, `m`, `h`, `d`, or `w` (e.g. `30d`, `24h`).
+- Duration format: `NNunit` where unit is `s`, `m`, `h`, `d`, or `w` (e.g. `30d`, `24h`).
 
 ### Planned subcommands (not yet implemented)
 

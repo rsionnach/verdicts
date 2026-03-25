@@ -80,6 +80,39 @@ def _cmd_list(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _cmd_retrospective(args: argparse.Namespace) -> None:
+    from nthlayer_learn.retrospective import build_retrospective
+
+    store = SQLiteVerdictStore(args.db)
+    try:
+        retro = build_retrospective(
+            incident_verdict_id=args.incident_verdict,
+            verdict_store=store,
+            specs_dir=args.specs_dir,
+        )
+        custom = retro.metadata.custom or {}
+        print(f"Retrospective: {retro.id}")
+        print(f"  Incident:     {custom.get('incident_verdict_id')}")
+        print(f"  Duration:     {custom.get('duration_minutes', 0):.1f} minutes")
+        print(f"  Decisions:    {custom.get('decisions_affected', 0)} affected")
+        print(f"  Verdicts:     {custom.get('verdict_count', 0)} in chain")
+        blast = custom.get("blast_radius", [])
+        print(f"  Blast radius: {', '.join(blast) if blast else 'unknown'}")
+        recs = custom.get("recommendations", [])
+        if recs:
+            print("  Recommendations:")
+            for r in recs:
+                print(f"    - [{r.get('type')}] {r.get('detail')}")
+        impact = custom.get("financial_impact")
+        if impact:
+            print(f"  Financial impact: ${impact.get('estimated', 0):.2f} ({impact.get('failure_mode')})")
+    except KeyError as e:
+        print(f"Error: {e}", file=__import__("sys").stderr)
+        __import__("sys").exit(1)
+    finally:
+        store.close()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="nthlayer-learn", description="Query verdict stores")
     sub = parser.add_subparsers(dest="command")
@@ -98,9 +131,17 @@ def main(argv: list[str] | None = None) -> None:
     lst.add_argument("--limit", type=int, default=20, help="Max results (default 20)")
     lst.add_argument("--db", default="verdicts.db", help="Path to SQLite store")
 
+    # retrospective
+    retro = sub.add_parser("retrospective", help="Generate post-incident retrospective from verdict chain")
+    retro.add_argument("--incident-verdict", required=True, help="Incident verdict ID")
+    retro.add_argument("--specs-dir", default=None, help="Directory of OpenSRM spec YAMLs (for financial impact)")
+    retro.add_argument("--db", default="verdicts.db", help="Path to SQLite store")
+
     args = parser.parse_args(argv)
 
     if args.command == "accuracy":
         _cmd_accuracy(args)
     elif args.command == "list":
         _cmd_list(args)
+    elif args.command == "retrospective":
+        _cmd_retrospective(args)
